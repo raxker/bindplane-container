@@ -1,0 +1,203 @@
+# This configuration is managed by Bindplane.
+# Configuration: home-lab:2
+receivers:
+    file_log/s-01M3ZPD8F0PW792XWHZGV8630S:
+        include:
+            - /var/log/bindplane/bindplane.log
+        include_file_name: true
+        include_file_name_resolved: false
+        include_file_path: false
+        include_file_path_resolved: false
+        max_concurrent_files: 1024
+        operators:
+            - from: body
+              id: save_log_record_original
+              to: attributes["log.record.original"]
+              type: copy
+            - parse_to: body
+              severity:
+                parse_from: body.level
+              timestamp:
+                layout: '%Y-%m-%dT%H:%M:%S.%f%z'
+                location: UTC
+                parse_from: body.timestamp
+              type: json_parser
+            - field: attributes.log_type
+              type: add
+              value: bindplane-op
+        poll_interval: 200ms
+        retry_on_failure:
+            enabled: false
+        start_at: end
+    netflow/s-01M3ZPBYN9184Z6NKA5AVA7CS8:
+        hostname: 0.0.0.0
+        port: 2055
+        scheme: netflow
+        send_raw: false
+        sockets: 1
+        workers: 1
+    syslog/s-01M3ZPBYN9184Z6NKA5DASP6X0:
+        location: UTC
+        operators:
+            - from: body
+              id: save_log_record_original
+              to: attributes["log.record.original"]
+              type: copy
+            - from: attributes.appname
+              id: move_appname
+              if: attributes.appname != nil
+              to: body.appname
+              type: move
+            - from: attributes.facility
+              id: move_facility
+              if: attributes.facility != nil
+              to: body.facility
+              type: move
+            - from: attributes.hostname
+              id: move_hostname
+              if: attributes.hostname != nil
+              to: body.hostname
+              type: move
+            - from: attributes.message
+              id: move_message
+              if: attributes.message != nil
+              to: body.message
+              type: move
+            - from: attributes.msg_id
+              id: move_msg_id
+              if: attributes.msg_id != nil
+              to: body.msg_id
+              type: move
+            - from: attributes.priority
+              id: move_priority
+              if: attributes.priority != nil
+              to: body.priority
+              type: move
+            - from: attributes.proc_id
+              id: move_proc_id
+              if: attributes.proc_id != nil
+              to: body.proc_id
+              type: move
+            - from: attributes.severity
+              id: move_severity
+              if: attributes.severity != nil
+              to: body.severity
+              type: move
+            - from: attributes.structured_data
+              id: move_structured_data
+              if: attributes.structured_data != nil
+              to: body.structured_data
+              type: move
+            - from: attributes.timestamp
+              id: move_timestamp
+              if: attributes.timestamp != nil
+              to: body.timestamp
+              type: move
+            - from: attributes.version
+              id: move_version
+              if: attributes.version != nil
+              to: body.version
+              type: move
+        protocol: rfc3164
+        udp:
+            add_attributes: false
+            async:
+                max_queue_length: 100
+                processors: 3
+                readers: 1
+            listen_address: 0.0.0.0:5140
+processors:
+    resource_detection/s-01M3ZPBYN9184Z6NKA5DASP6X0:
+        detectors:
+            - system
+        system:
+            hostname_sources:
+                - os
+    resource_detection/s-01M3ZPD8F0PW792XWHZGV8630S:
+        detectors:
+            - system
+        system:
+            hostname_sources:
+                - os
+    transform/dynatrace-lunch-learn__drop-raw-copy:
+        log_statements:
+            - context: log
+              statements:
+                - delete_key(attributes, "log.record.original")
+connectors:
+    forward/d-d-dynatrace-lunch-learn: null
+exporters:
+    otlp_http/dynatrace-lunch-learn:
+        auth:
+            authenticator: bearertokenauth/dynatrace-lunch-learn
+        compression: gzip
+        endpoint: https://wnu96275.live.dynatrace.com/api/v2/otlp
+        retry_on_failure:
+            enabled: true
+            initial_interval: 5s
+            max_elapsed_time: 300s
+            max_interval: 30s
+        sending_queue:
+            enabled: true
+            num_consumers: 10
+            queue_size: 5000
+            storage: file_storage/dynatrace-lunch-learn__persistent_queue_storage_extension
+extensions:
+    bearertokenauth/dynatrace-lunch-learn:
+        scheme: Api-Token
+        token: (sensitive)
+    file_storage/dynatrace-lunch-learn__persistent_queue_storage_extension:
+        compaction:
+            directory: ${OIQ_OTEL_COLLECTOR_HOME}/storage
+            on_rebound: true
+        create_directory: true
+        directory: ${OIQ_OTEL_COLLECTOR_HOME}/storage
+        fsync: true
+        timeout: 1s
+    file_storage/s-01M3ZPD8F0PW792XWHZGV8630S:
+        compaction:
+            directory: ${OIQ_OTEL_COLLECTOR_HOME}/storage
+            on_rebound: true
+        directory: ${OIQ_OTEL_COLLECTOR_HOME}/storage
+service:
+    extensions:
+        - bearertokenauth/dynatrace-lunch-learn
+        - file_storage/dynatrace-lunch-learn__persistent_queue_storage_extension
+        - file_storage/s-01M3ZPD8F0PW792XWHZGV8630S
+    pipelines:
+        logs/d-d-dynatrace-lunch-learn:
+            receivers:
+                - forward/d-d-dynatrace-lunch-learn
+            processors:
+                - transform/dynatrace-lunch-learn__drop-raw-copy
+            exporters:
+                - otlp_http/dynatrace-lunch-learn
+        logs/s-01M3ZPBYN9184Z6NKA5AVA7CS8:
+            receivers:
+                - netflow/s-01M3ZPBYN9184Z6NKA5AVA7CS8
+            processors: []
+            exporters:
+                - forward/d-d-dynatrace-lunch-learn
+        logs/s-01M3ZPBYN9184Z6NKA5DASP6X0:
+            receivers:
+                - syslog/s-01M3ZPBYN9184Z6NKA5DASP6X0
+            processors:
+                - resource_detection/s-01M3ZPBYN9184Z6NKA5DASP6X0
+            exporters:
+                - forward/d-d-dynatrace-lunch-learn
+        logs/s-01M3ZPD8F0PW792XWHZGV8630S:
+            receivers:
+                - file_log/s-01M3ZPD8F0PW792XWHZGV8630S
+            processors:
+                - resource_detection/s-01M3ZPD8F0PW792XWHZGV8630S
+            exporters:
+                - forward/d-d-dynatrace-lunch-learn
+    telemetry:
+        metrics:
+            readers:
+                - pull:
+                    exporter:
+                        prometheus:
+                            host: localhost
+                            port: 8888
+            level: detailed
